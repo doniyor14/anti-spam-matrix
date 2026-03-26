@@ -2,21 +2,29 @@ use std::{fs, path::PathBuf, process};
 
 use anyhow::Result;
 use matrix_sdk::{ruma::UserId, Room};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::config::Config;
 use crate::PACKAGE_NAME;
 
+const BAN_REASON: &str = "Spam";
+
 pub async fn ban_user_in_room(room: &Room, sender: &UserId) {
-    if let Err(e) = room.ban_user(&sender, Some("Spam")).await {
-        let room_name = room
-            .name()
-            .as_deref()
-            .map(str::to_string)
-            .or_else(|| room.alt_aliases().first().map(|a| a.alias().to_string()))
-            .unwrap_or("Unknown".into());
-        warn!("failed to ban {sender} from {room_name}: {e}");
-    };
+    match room.ban_user(sender, Some(BAN_REASON)).await {
+        Ok(_) => {
+            let room_id = room.room_id();
+            info!("banned {sender} from {room_id}");
+        }
+        Err(e) => {
+            let room_name = room
+                .name()
+                .as_deref()
+                .map(str::to_string)
+                .or_else(|| room.alt_aliases().first().map(|a| a.alias().to_string()))
+                .unwrap_or("Unknown".into());
+            warn!("failed to ban {sender} from {room_name}: {e}");
+        }
+    }
 }
 
 pub fn init_dirs() -> Result<(PathBuf, PathBuf)> {

@@ -1,5 +1,5 @@
 use crate::PACKAGE_NAME;
-use std::{fs, path::PathBuf};
+use std::{fs, path::Path};
 
 use anyhow::Result;
 use matrix_sdk::{
@@ -20,8 +20,8 @@ pub async fn password_login(
     Ok(())
 }
 
-pub async fn sso_login(client: &Client, auth_path: &PathBuf) -> Result<()> {
-    if let Ok(auth) = fs::read_to_string(&auth_path) {
+pub async fn sso_login(client: &Client, auth_path: &Path) -> Result<()> {
+    if let Ok(auth) = fs::read_to_string(auth_path) {
         let session: MatrixSession = serde_json::from_str(&auth)?;
         if client.restore_session(session).await.is_ok() {
             return Ok(());
@@ -49,6 +49,6 @@ pub async fn sso_login(client: &Client, auth_path: &PathBuf) -> Result<()> {
             refresh_token: auth_resp.refresh_token,
         },
     };
-    fs::write(&auth_path, serde_json::to_string_pretty(&session)?)?;
+    fs::write(auth_path, serde_json::to_string_pretty(&session)?)?;
     Ok(())
 }

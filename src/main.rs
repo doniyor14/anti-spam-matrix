@@ -7,7 +7,6 @@ use utils::{ban_user_in_room, init_dirs};
 
 use std::{
     fs,
-    path::PathBuf,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -39,9 +38,11 @@ async fn main() -> Result<()> {
     let config: Arc<Config> = Arc::new(toml::from_str(&fs::read_to_string(config_path)?)?);
     let spam_count_map: Arc<SkipMap<String, AtomicUsize>> = Arc::new(SkipMap::new());
 
+    config.validate()?;
+
     let client = Arc::new(build_client(&config, &auth_path).await?);
 
-    let _client = client.clone();
+    let banning_client = client.clone();
     let regex_set = RegexSet::new(&config.spam_regex_exprs)?;
     client.add_event_handler(|ev: SyncRoomMessageEvent| async move {
         let SyncMessageLikeEvent::Original(ev) = ev else {
@@ -57,8 +58,7 @@ async fn main() -> Result<()> {
         }
 
         let body = content.msgtype.body();
-        let count_entity =
-            spam_count_map.get_or_insert(sender.to_string(), AtomicUsize::new(0));
+        let count_entity = spam_count_map.get_or_insert(sender.to_string(), AtomicUsize::new(0));
         if regex_set.is_match(body) {
             count_entity.value().fetch_add(1, Ordering::AcqRel);
         } else {
@@ -66,9 +66,12 @@ async fn main() -> Result<()> {
         }
 
         if count_entity.value().load(Ordering::Acquire) >= config.spam_limit as _ {
-            for room in _client.joined_rooms() {
+            for room in banning_client.joined_rooms() {
                 ban_user_in_room(&room, &sender).await;
             }
+            // Reset count after banning so subsequent messages don't trigger
+            // repeated ban attempts for an already-banned user.
+            count_entity.value().store(0, Ordering::Release);
         }
     });
 
@@ -77,7 +80,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn build_client(config: &Config, auth_path: &PathBuf) -> Result<Client> {
+async fn build_client(config: &Config, auth_path: &std::path::Path) -> Result<Client> {
     let userid: &UserId = config.username.as_str().try_into()?;
     let mut client = matrix_sdk::Client::builder().server_name(userid.server_name());
     if let Some(proxy) = &config.proxy {
@@ -86,10 +89,10 @@ async fn build_client(config: &Config, auth_path: &PathBuf) -> Result<Client> {
     let client = client.build().await?;
     match &config.auth {
         config::Auth::Password { password } => {
-            password_login(&client, &userid, &password).await?;
+            password_login(&client, userid, password).await?;
         }
         config::Auth::SSO => {
-            sso_login(&client, &auth_path).await?;
+            sso_login(&client, auth_path).await?;
         }
     }
 
